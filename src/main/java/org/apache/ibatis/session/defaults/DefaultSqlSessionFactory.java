@@ -100,12 +100,18 @@ public class DefaultSqlSessionFactory implements SqlSessionFactory {
     Transaction tx = null;
     try {
       //通过Configuration对象去获取Mybatis相关配置信息, Environment对象包含了数据源和事务的配置
+      //1.从配置中获取Environment
       final Environment environment = configuration.getEnvironment();
+      //2.从Environment中取得TransactionFactory；
       final TransactionFactory transactionFactory = getTransactionFactoryFromEnvironment(environment);
+      //3.从Environment中取得DataSource；
+      //4.在取得的数据库连接上创建事务对象Transaction
       tx = transactionFactory.newTransaction(environment.getDataSource(), level, autoCommit);
       //之前说了，从表面上来看，咱们是用sqlSession在执行sql语句， 实际呢，其实是通过executor执行， executor是对于Statement的封装
+      //5.创建Executor对象（该对象非常重要，事实上sqlSession的所有操作都是通过它完成的）
       final Executor executor = configuration.newExecutor(tx, execType);
       //关键看这儿，创建了一个DefaultSqlSession对象
+      //6.创建sqlsession对象
       return new DefaultSqlSession(configuration, executor, autoCommit);
     } catch (Exception e) {
       closeTransaction(tx); // may have fetched a connection so lets call close()

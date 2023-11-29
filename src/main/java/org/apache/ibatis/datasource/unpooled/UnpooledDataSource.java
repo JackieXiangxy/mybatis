@@ -15,12 +15,11 @@
  */
 package org.apache.ibatis.datasource.unpooled;
 
+import org.apache.ibatis.io.Resources;
+
+import javax.sql.DataSource;
 import java.io.PrintWriter;
-import java.sql.Connection;
-import java.sql.Driver;
-import java.sql.DriverManager;
-import java.sql.DriverPropertyInfo;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.Enumeration;
 import java.util.Map;
 import java.util.Properties;
@@ -28,28 +27,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.logging.Logger;
 
-import javax.sql.DataSource;
-
-import org.apache.ibatis.io.Resources;
-
 /**
  * @author Clinton Begin
  * @author Eduardo Macarron
  */
 public class UnpooledDataSource implements DataSource {
 
-  private ClassLoader driverClassLoader;
-  private Properties driverProperties;
-  private static Map<String, Driver> registeredDrivers = new ConcurrentHashMap<>();
-
-  private String driver;
-  private String url;
-  private String username;
-  private String password;
-
-  private Boolean autoCommit;
-  private Integer defaultTransactionIsolationLevel;
-  private Integer defaultNetworkTimeout;
+  private static final Map<String, Driver> registeredDrivers = new ConcurrentHashMap<>();
 
   static {
     Enumeration<Driver> drivers = DriverManager.getDrivers();
@@ -58,6 +42,30 @@ public class UnpooledDataSource implements DataSource {
       registeredDrivers.put(driver.getClass().getName(), driver);
     }
   }
+
+  private ClassLoader driverClassLoader;
+  private Properties driverProperties;
+
+  /**
+   * 这是 JDBC 驱动的 Java 类全限定名（并不是 JDBC 驱动中可能包含的数据源类）
+   */
+  private String driver;
+  /**
+   * 这是数据库的 JDBC URL 地址
+   */
+  private String url;
+  private String username;
+  private String password;
+  private Boolean autoCommit;
+
+  /**
+   * 默认的连接事务隔离级别。
+   */
+  private Integer defaultTransactionIsolationLevel;
+  /**
+   * 等待数据库操作完成的默认网络超时时间（单位：毫秒）。查看 java.sql.Connection#setNetworkTimeout() 的 API 文档以获取更多信息。
+   */
+  private Integer defaultNetworkTimeout;
 
   public UnpooledDataSource() {
   }
@@ -101,23 +109,23 @@ public class UnpooledDataSource implements DataSource {
   }
 
   @Override
-  public void setLoginTimeout(int loginTimeout) {
-    DriverManager.setLoginTimeout(loginTimeout);
-  }
-
-  @Override
   public int getLoginTimeout() {
     return DriverManager.getLoginTimeout();
   }
 
   @Override
-  public void setLogWriter(PrintWriter logWriter) {
-    DriverManager.setLogWriter(logWriter);
+  public void setLoginTimeout(int loginTimeout) {
+    DriverManager.setLoginTimeout(loginTimeout);
   }
 
   @Override
   public PrintWriter getLogWriter() {
     return DriverManager.getLogWriter();
+  }
+
+  @Override
+  public void setLogWriter(PrintWriter logWriter) {
+    DriverManager.setLogWriter(logWriter);
   }
 
   public ClassLoader getDriverClassLoader() {
@@ -197,8 +205,7 @@ public class UnpooledDataSource implements DataSource {
   /**
    * Sets the default network timeout value to wait for the database operation to complete. See {@link Connection#setNetworkTimeout(java.util.concurrent.Executor, int)}
    *
-   * @param defaultNetworkTimeout
-   *          The time in milliseconds to wait for the database operation to complete.
+   * @param defaultNetworkTimeout The time in milliseconds to wait for the database operation to complete.
    * @since 3.5.2
    */
   public void setDefaultNetworkTimeout(Integer defaultNetworkTimeout) {
@@ -258,8 +265,24 @@ public class UnpooledDataSource implements DataSource {
     }
   }
 
+  @Override
+  public <T> T unwrap(Class<T> iface) throws SQLException {
+    throw new SQLException(getClass().getName() + " is not a wrapper.");
+  }
+
+  @Override
+  public boolean isWrapperFor(Class<?> iface) throws SQLException {
+    return false;
+  }
+
+  @Override
+  public Logger getParentLogger() {
+    // requires JDK version 1.6
+    return Logger.getLogger(Logger.GLOBAL_LOGGER_NAME);
+  }
+
   private static class DriverProxy implements Driver {
-    private Driver driver;
+    private final Driver driver;
 
     DriverProxy(Driver d) {
       this.driver = d;
@@ -299,22 +322,6 @@ public class UnpooledDataSource implements DataSource {
     public Logger getParentLogger() {
       return Logger.getLogger(Logger.GLOBAL_LOGGER_NAME);
     }
-  }
-
-  @Override
-  public <T> T unwrap(Class<T> iface) throws SQLException {
-    throw new SQLException(getClass().getName() + " is not a wrapper.");
-  }
-
-  @Override
-  public boolean isWrapperFor(Class<?> iface) throws SQLException {
-    return false;
-  }
-
-  @Override
-  public Logger getParentLogger() {
-    // requires JDK version 1.6
-    return Logger.getLogger(Logger.GLOBAL_LOGGER_NAME);
   }
 
 }

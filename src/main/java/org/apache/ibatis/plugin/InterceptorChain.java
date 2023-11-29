@@ -26,6 +26,11 @@ public class InterceptorChain {
 
   private final List<Interceptor> interceptors = new ArrayList<>();
 
+  /**
+   * 每一个拦截器对目标类都进行一次代理
+   * @param target 代理对象
+   * @return 层层代理后的对象
+   */
   public Object pluginAll(Object target) {
     for (Interceptor interceptor : interceptors) {
       target = interceptor.plugin(target);

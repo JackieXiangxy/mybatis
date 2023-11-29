@@ -15,6 +15,11 @@
  */
 package org.apache.ibatis.datasource.pooled;
 
+import org.apache.ibatis.datasource.unpooled.UnpooledDataSource;
+import org.apache.ibatis.logging.Log;
+import org.apache.ibatis.logging.LogFactory;
+
+import javax.sql.DataSource;
 import java.io.PrintWriter;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
@@ -24,12 +29,6 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Properties;
 import java.util.logging.Logger;
-
-import javax.sql.DataSource;
-
-import org.apache.ibatis.datasource.unpooled.UnpooledDataSource;
-import org.apache.ibatis.logging.Log;
-import org.apache.ibatis.logging.LogFactory;
 
 /**
  * This is a simple, synchronous, thread-safe database connection pool.
@@ -45,12 +44,27 @@ public class PooledDataSource implements DataSource {
   private final UnpooledDataSource dataSource;
 
   // OPTIONAL CONFIGURATION FIELDS
+  /**
+   * 在任意时间可存在的活动（正在使用）连接数量，默认值：10
+   */
   protected int poolMaximumActiveConnections = 10;
+  /**
+   * 任意时间可能存在的空闲连接数
+   */
   protected int poolMaximumIdleConnections = 5;
+  /**
+   * 在被强制返回之前，池中连接被检出（checked out）时间，默认值：20000 毫秒（即 20 秒）
+   */
   protected int poolMaximumCheckoutTime = 20000;
+  /**
+   * 这是一个底层设置，如果获取连接花费了相当长的时间，连接池会打印状态日志并重新尝试获取一个连接（避免在误配置的情况下一直失败且不打印日志），默认值：20000 毫秒（即 20 秒）
+   */
   protected int poolTimeToWait = 20000;
   protected int poolMaximumLocalBadConnectionTolerance = 3;
   protected String poolPingQuery = "NO PING QUERY SET";
+  /**
+   * 是否启用侦测查询
+   */
   protected boolean poolPingEnabled;
   protected int poolPingConnectionsNotUsedFor;
 
@@ -84,6 +98,22 @@ public class PooledDataSource implements DataSource {
     expectedConnectionTypeCode = assembleConnectionTypeCode(dataSource.getUrl(), dataSource.getUsername(), dataSource.getPassword());
   }
 
+  /**
+   * Unwraps a pooled connection to get to the 'real' connection
+   *
+   * @param conn - the pooled connection to unwrap
+   * @return The 'real' connection
+   */
+  public static Connection unwrapConnection(Connection conn) {
+    if (Proxy.isProxyClass(conn.getClass())) {
+      InvocationHandler handler = Proxy.getInvocationHandler(conn);
+      if (handler instanceof PooledConnection) {
+        return ((PooledConnection) handler).getRealConnection();
+      }
+    }
+    return conn;
+  }
+
   @Override
   public Connection getConnection() throws SQLException {
     return popConnection(dataSource.getUsername(), dataSource.getPassword()).getProxyConnection();
@@ -95,18 +125,13 @@ public class PooledDataSource implements DataSource {
   }
 
   @Override
-  public void setLoginTimeout(int loginTimeout) {
-    DriverManager.setLoginTimeout(loginTimeout);
-  }
-
-  @Override
   public int getLoginTimeout() {
     return DriverManager.getLoginTimeout();
   }
 
   @Override
-  public void setLogWriter(PrintWriter logWriter) {
-    DriverManager.setLogWriter(logWriter);
+  public void setLoginTimeout(int loginTimeout) {
+    DriverManager.setLoginTimeout(loginTimeout);
   }
 
   @Override
@@ -114,24 +139,9 @@ public class PooledDataSource implements DataSource {
     return DriverManager.getLogWriter();
   }
 
-  public void setDriver(String driver) {
-    dataSource.setDriver(driver);
-    forceCloseAll();
-  }
-
-  public void setUrl(String url) {
-    dataSource.setUrl(url);
-    forceCloseAll();
-  }
-
-  public void setUsername(String username) {
-    dataSource.setUsername(username);
-    forceCloseAll();
-  }
-
-  public void setPassword(String password) {
-    dataSource.setPassword(password);
-    forceCloseAll();
+  @Override
+  public void setLogWriter(PrintWriter logWriter) {
+    DriverManager.setLogWriter(logWriter);
   }
 
   public void setDefaultAutoCommit(boolean defaultAutoCommit) {
@@ -139,135 +149,40 @@ public class PooledDataSource implements DataSource {
     forceCloseAll();
   }
 
-  public void setDefaultTransactionIsolationLevel(Integer defaultTransactionIsolationLevel) {
-    dataSource.setDefaultTransactionIsolationLevel(defaultTransactionIsolationLevel);
-    forceCloseAll();
-  }
-
-  public void setDriverProperties(Properties driverProps) {
-    dataSource.setDriverProperties(driverProps);
-    forceCloseAll();
-  }
-
-  /**
-   * Sets the default network timeout value to wait for the database operation to complete. See {@link Connection#setNetworkTimeout(java.util.concurrent.Executor, int)}
-   *
-   * @param milliseconds
-   *          The time in milliseconds to wait for the database operation to complete.
-   * @since 3.5.2
-   */
-  public void setDefaultNetworkTimeout(Integer milliseconds) {
-    dataSource.setDefaultNetworkTimeout(milliseconds);
-    forceCloseAll();
-  }
-
-  /**
-   * The maximum number of active connections.
-   *
-   * @param poolMaximumActiveConnections
-   *          The maximum number of active connections
-   */
-  public void setPoolMaximumActiveConnections(int poolMaximumActiveConnections) {
-    this.poolMaximumActiveConnections = poolMaximumActiveConnections;
-    forceCloseAll();
-  }
-
-  /**
-   * The maximum number of idle connections.
-   *
-   * @param poolMaximumIdleConnections
-   *          The maximum number of idle connections
-   */
-  public void setPoolMaximumIdleConnections(int poolMaximumIdleConnections) {
-    this.poolMaximumIdleConnections = poolMaximumIdleConnections;
-    forceCloseAll();
-  }
-
-  /**
-   * The maximum number of tolerance for bad connection happens in one thread
-   * which are applying for new {@link PooledConnection}.
-   *
-   * @param poolMaximumLocalBadConnectionTolerance
-   *          max tolerance for bad connection happens in one thread
-   *
-   * @since 3.4.5
-   */
-  public void setPoolMaximumLocalBadConnectionTolerance(
-      int poolMaximumLocalBadConnectionTolerance) {
-    this.poolMaximumLocalBadConnectionTolerance = poolMaximumLocalBadConnectionTolerance;
-  }
-
-  /**
-   * The maximum time a connection can be used before it *may* be
-   * given away again.
-   *
-   * @param poolMaximumCheckoutTime
-   *          The maximum time
-   */
-  public void setPoolMaximumCheckoutTime(int poolMaximumCheckoutTime) {
-    this.poolMaximumCheckoutTime = poolMaximumCheckoutTime;
-    forceCloseAll();
-  }
-
-  /**
-   * The time to wait before retrying to get a connection.
-   *
-   * @param poolTimeToWait
-   *          The time to wait
-   */
-  public void setPoolTimeToWait(int poolTimeToWait) {
-    this.poolTimeToWait = poolTimeToWait;
-    forceCloseAll();
-  }
-
-  /**
-   * The query to be used to check a connection.
-   *
-   * @param poolPingQuery
-   *          The query
-   */
-  public void setPoolPingQuery(String poolPingQuery) {
-    this.poolPingQuery = poolPingQuery;
-    forceCloseAll();
-  }
-
-  /**
-   * Determines if the ping query should be used.
-   *
-   * @param poolPingEnabled
-   *          True if we need to check a connection before using it
-   */
-  public void setPoolPingEnabled(boolean poolPingEnabled) {
-    this.poolPingEnabled = poolPingEnabled;
-    forceCloseAll();
-  }
-
-  /**
-   * If a connection has not been used in this many milliseconds, ping the
-   * database to make sure the connection is still good.
-   *
-   * @param milliseconds
-   *          the number of milliseconds of inactivity that will trigger a ping
-   */
-  public void setPoolPingConnectionsNotUsedFor(int milliseconds) {
-    this.poolPingConnectionsNotUsedFor = milliseconds;
-    forceCloseAll();
-  }
-
   public String getDriver() {
     return dataSource.getDriver();
+  }
+
+  public void setDriver(String driver) {
+    dataSource.setDriver(driver);
+    forceCloseAll();
   }
 
   public String getUrl() {
     return dataSource.getUrl();
   }
 
+  public void setUrl(String url) {
+    dataSource.setUrl(url);
+    forceCloseAll();
+  }
+
   public String getUsername() {
     return dataSource.getUsername();
   }
 
+  public void setUsername(String username) {
+    dataSource.setUsername(username);
+    forceCloseAll();
+  }
+
   public String getPassword() {
     return dataSource.getPassword();
+  }
+
+  public void setPassword(String password) {
+    dataSource.setPassword(password);
+    forceCloseAll();
   }
 
   public boolean isAutoCommit() {
@@ -278,8 +193,18 @@ public class PooledDataSource implements DataSource {
     return dataSource.getDefaultTransactionIsolationLevel();
   }
 
+  public void setDefaultTransactionIsolationLevel(Integer defaultTransactionIsolationLevel) {
+    dataSource.setDefaultTransactionIsolationLevel(defaultTransactionIsolationLevel);
+    forceCloseAll();
+  }
+
   public Properties getDriverProperties() {
     return dataSource.getDriverProperties();
+  }
+
+  public void setDriverProperties(Properties driverProps) {
+    dataSource.setDriverProperties(driverProps);
+    forceCloseAll();
   }
 
   /**
@@ -292,36 +217,131 @@ public class PooledDataSource implements DataSource {
     return dataSource.getDefaultNetworkTimeout();
   }
 
+  /**
+   * Sets the default network timeout value to wait for the database operation to complete. See {@link Connection#setNetworkTimeout(java.util.concurrent.Executor, int)}
+   *
+   * @param milliseconds The time in milliseconds to wait for the database operation to complete.
+   * @since 3.5.2
+   */
+  public void setDefaultNetworkTimeout(Integer milliseconds) {
+    dataSource.setDefaultNetworkTimeout(milliseconds);
+    forceCloseAll();
+  }
+
   public int getPoolMaximumActiveConnections() {
     return poolMaximumActiveConnections;
+  }
+
+  /**
+   * The maximum number of active connections.
+   *
+   * @param poolMaximumActiveConnections The maximum number of active connections
+   */
+  public void setPoolMaximumActiveConnections(int poolMaximumActiveConnections) {
+    this.poolMaximumActiveConnections = poolMaximumActiveConnections;
+    forceCloseAll();
   }
 
   public int getPoolMaximumIdleConnections() {
     return poolMaximumIdleConnections;
   }
 
+  /**
+   * The maximum number of idle connections.
+   *
+   * @param poolMaximumIdleConnections The maximum number of idle connections
+   */
+  public void setPoolMaximumIdleConnections(int poolMaximumIdleConnections) {
+    this.poolMaximumIdleConnections = poolMaximumIdleConnections;
+    forceCloseAll();
+  }
+
   public int getPoolMaximumLocalBadConnectionTolerance() {
     return poolMaximumLocalBadConnectionTolerance;
+  }
+
+  /**
+   * The maximum number of tolerance for bad connection happens in one thread
+   * which are applying for new {@link PooledConnection}.
+   *
+   * @param poolMaximumLocalBadConnectionTolerance max tolerance for bad connection happens in one thread
+   * @since 3.4.5
+   */
+  public void setPoolMaximumLocalBadConnectionTolerance(
+    int poolMaximumLocalBadConnectionTolerance) {
+    this.poolMaximumLocalBadConnectionTolerance = poolMaximumLocalBadConnectionTolerance;
   }
 
   public int getPoolMaximumCheckoutTime() {
     return poolMaximumCheckoutTime;
   }
 
+  /**
+   * The maximum time a connection can be used before it *may* be
+   * given away again.
+   *
+   * @param poolMaximumCheckoutTime The maximum time
+   */
+  public void setPoolMaximumCheckoutTime(int poolMaximumCheckoutTime) {
+    this.poolMaximumCheckoutTime = poolMaximumCheckoutTime;
+    forceCloseAll();
+  }
+
   public int getPoolTimeToWait() {
     return poolTimeToWait;
+  }
+
+  /**
+   * The time to wait before retrying to get a connection.
+   *
+   * @param poolTimeToWait The time to wait
+   */
+  public void setPoolTimeToWait(int poolTimeToWait) {
+    this.poolTimeToWait = poolTimeToWait;
+    forceCloseAll();
   }
 
   public String getPoolPingQuery() {
     return poolPingQuery;
   }
 
+  /**
+   * The query to be used to check a connection.
+   *
+   * @param poolPingQuery The query
+   */
+  public void setPoolPingQuery(String poolPingQuery) {
+    this.poolPingQuery = poolPingQuery;
+    forceCloseAll();
+  }
+
   public boolean isPoolPingEnabled() {
     return poolPingEnabled;
   }
 
+  /**
+   * Determines if the ping query should be used.
+   *
+   * @param poolPingEnabled True if we need to check a connection before using it
+   */
+  public void setPoolPingEnabled(boolean poolPingEnabled) {
+    this.poolPingEnabled = poolPingEnabled;
+    forceCloseAll();
+  }
+
   public int getPoolPingConnectionsNotUsedFor() {
     return poolPingConnectionsNotUsedFor;
+  }
+
+  /**
+   * If a connection has not been used in this many milliseconds, ping the
+   * database to make sure the connection is still good.
+   *
+   * @param milliseconds the number of milliseconds of inactivity that will trigger a ping
+   */
+  public void setPoolPingConnectionsNotUsedFor(int milliseconds) {
+    this.poolPingConnectionsNotUsedFor = milliseconds;
+    forceCloseAll();
   }
 
   /**
@@ -369,7 +389,7 @@ public class PooledDataSource implements DataSource {
   }
 
   private int assembleConnectionTypeCode(String url, String username, String password) {
-    return ("" + url + username + password).hashCode();
+    return (url + username + password).hashCode();
   }
 
   protected void pushConnection(PooledConnection conn) throws SQLException {
@@ -530,8 +550,7 @@ public class PooledDataSource implements DataSource {
   /**
    * Method to check to see if a connection is still usable
    *
-   * @param conn
-   *          - the connection to check
+   * @param conn - the connection to check
    * @return True if the connection is still usable
    */
   protected boolean pingConnection(PooledConnection conn) {
@@ -547,7 +566,7 @@ public class PooledDataSource implements DataSource {
     }
 
     if (result && poolPingEnabled && poolPingConnectionsNotUsedFor >= 0
-        && conn.getTimeElapsedSinceLastUse() > poolPingConnectionsNotUsedFor) {
+      && conn.getTimeElapsedSinceLastUse() > poolPingConnectionsNotUsedFor) {
       try {
         if (log.isDebugEnabled()) {
           log.debug("Testing connection " + conn.getRealHashCode() + " ...");
@@ -577,23 +596,6 @@ public class PooledDataSource implements DataSource {
       }
     }
     return result;
-  }
-
-  /**
-   * Unwraps a pooled connection to get to the 'real' connection
-   *
-   * @param conn
-   *          - the pooled connection to unwrap
-   * @return The 'real' connection
-   */
-  public static Connection unwrapConnection(Connection conn) {
-    if (Proxy.isProxyClass(conn.getClass())) {
-      InvocationHandler handler = Proxy.getInvocationHandler(conn);
-      if (handler instanceof PooledConnection) {
-        return ((PooledConnection) handler).getRealConnection();
-      }
-    }
-    return conn;
   }
 
   @Override
